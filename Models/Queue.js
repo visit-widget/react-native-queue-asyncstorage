@@ -324,9 +324,7 @@ export class Queue {
     this.worker.executeJobLifecycleCallback('onStart', jobName, jobId, jobPayload);
 
     try {
-      const executionResult = await this.worker.executeJob(job); // here we catch js/network errors
-      
-      if (!executionResult.ok) throw new Error('Execution failure'); // here we catch http errors
+      await this.worker.executeJob(job); // here we catch js/network errors
 
       // On successful job completion, remove job
       this.jobDB.delete(job);
