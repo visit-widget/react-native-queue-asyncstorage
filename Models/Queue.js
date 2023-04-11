@@ -4,16 +4,14 @@
  *
  */
 
-import uuid from 'react-native-uuid';
-import promiseReflect from 'promise-reflect';
-import _ from 'lodash';
+import uuid from "react-native-uuid";
+import promiseReflect from "promise-reflect";
+import _ from "lodash";
 
-import JobDatabase from '../config/Database';
-import Worker from './Worker';
-
+import JobDatabase from "../config/Database";
+import Worker from "./Worker";
 
 export class Queue {
-
   /**
    *
    * Set initial class properties.
@@ -25,7 +23,7 @@ export class Queue {
   constructor(executeFailedJobsOnStart = false) {
     this.jobDB = null;
     this.worker = new Worker();
-    this.status = 'inactive';
+    this.status = "inactive";
     this.executeFailedJobsOnStart = executeFailedJobsOnStart;
   }
 
@@ -39,7 +37,7 @@ export class Queue {
       this.jobDB = new JobDatabase();
       await this.jobDB.init();
     }
-  }
+  };
 
   /**
    *
@@ -85,15 +83,24 @@ export class Queue {
    * @param options {object} - Job related options like timeout etc. See README.md for job options info.
    * @param startQueue - {boolean} - Whether or not to immediately begin prcessing queue. If false queue.start() must be manually called.
    */
-  createJob(name, payload = {}, options = {}, startQueue = true) {
-
+  async createJob(
+    name,
+    payload = {},
+    options = {},
+    startQueue = true,
+    workerFunction = null
+  ) {
     if (!name) {
-      throw new Error('Job name must be supplied.');
+      throw new Error("Job name must be supplied.");
     }
 
     // Validate options
     if (options.timeout < 0 || options.attempts < 0) {
-      throw new Error('Invalid job option.');
+      throw new Error("Invalid job option.");
+    }
+
+    if (!this.worker.doesWorkerExist(name) && workerFunction) {
+      workerFunction();
     }
 
     // here we reset `failed` prop
@@ -114,20 +121,19 @@ export class Queue {
       name,
       payload: JSON.stringify(payload),
       data: JSON.stringify({
-        attempts: options.attempts || 1
+        attempts: options.attempts || 1,
       }),
       priority: options.priority || 0,
       active: false,
-      timeout: (options.timeout >= 0) ? options.timeout : 25000,
+      timeout: options.timeout >= 0 ? options.timeout : 25000,
       created: new Date(),
       failed: null,
     });
 
     // Start queue on job creation if it isn't running by default.
-    if (startQueue && this.status === 'inactive') {
-      this.start();
+    if (startQueue && this.status === "inactive") {
+      await this.start();
     }
-
   }
 
   /**
@@ -154,13 +160,12 @@ export class Queue {
    * @return {boolean|undefined} - False if queue is already started. Otherwise nothing is returned when queue finishes processing.
    */
   async start(lifespan = 0) {
-
     // If queue is already running, don't fire up concurrent loop.
-    if (this.status == 'active') {
+    if (this.status == "active") {
       return false;
     }
 
-    this.status = 'active';
+    this.status = "active";
 
     // Get jobs to process
     const startTime = Date.now();
@@ -169,16 +174,16 @@ export class Queue {
 
     if (lifespan !== 0) {
       lifespanRemaining = lifespan - (Date.now() - startTime);
-      lifespanRemaining = (lifespanRemaining === 0) ? -1 : lifespanRemaining; // Handle exactly zero lifespan remaining edge case.
+      lifespanRemaining = lifespanRemaining === 0 ? -1 : lifespanRemaining; // Handle exactly zero lifespan remaining edge case.
+
       concurrentJobs = await this.getConcurrentJobs(lifespanRemaining);
     } else {
       concurrentJobs = await this.getConcurrentJobs();
     }
 
-    while (this.status === 'active' && concurrentJobs.length) {
-
+    while (this.status === "active" && concurrentJobs.length) {
       // Loop over jobs and process them concurrently.
-      const processingJobs = concurrentJobs.map(job => {
+      const processingJobs = concurrentJobs.map((job) => {
         return this.processJob(job);
       });
 
@@ -189,16 +194,15 @@ export class Queue {
       // Get next batch of jobs.
       if (lifespan !== 0) {
         lifespanRemaining = lifespan - (Date.now() - startTime);
-        lifespanRemaining = (lifespanRemaining === 0) ? -1 : lifespanRemaining; // Handle exactly zero lifespan remaining edge case.
+        lifespanRemaining = lifespanRemaining === 0 ? -1 : lifespanRemaining; // Handle exactly zero lifespan remaining edge case.
+
         concurrentJobs = await this.getConcurrentJobs(lifespanRemaining);
       } else {
         concurrentJobs = await this.getConcurrentJobs();
       }
-
     }
 
-    this.status = 'inactive';
-
+    this.status = "inactive";
   }
 
   /**
@@ -210,7 +214,7 @@ export class Queue {
    *
    */
   stop() {
-    this.status = 'inactive';
+    this.status = "inactive";
   }
 
   /**
@@ -239,7 +243,6 @@ export class Queue {
    * @return {promise} - Promise resolves to an array of job(s) to be processed next by the queue.
    */
   async getConcurrentJobs(queueLifespanRemaining = 0) {
-
     let concurrentJobs = [];
 
     // Get next job from queue.
@@ -247,13 +250,20 @@ export class Queue {
 
     // Build query string
     // If queueLife
-    const timeoutUpperBound = (queueLifespanRemaining - 500 > 0) ? queueLifespanRemaining - 499 : 0; // Only get jobs with timeout at least 500ms < queueLifespanRemaining.
+    const timeoutUpperBound =
+      queueLifespanRemaining - 500 > 0 ? queueLifespanRemaining - 499 : 0; // Only get jobs with timeout at least 500ms < queueLifespanRemaining.
 
     let jobs = this.jobDB.objects();
-    jobs = (queueLifespanRemaining)
-      ? jobs.filter(j => (!j.active && j.failed === null && j.timeout > 0 && j.timeout < timeoutUpperBound))
-      : jobs.filter(j => (!j.active && j.failed === null));
-    jobs = _.orderBy(jobs, ['priority', 'created'], ['asc', 'asc']);
+    jobs = queueLifespanRemaining
+      ? jobs.filter(
+          (j) =>
+            !j.active &&
+            j.failed === null &&
+            j.timeout > 0 &&
+            j.timeout < timeoutUpperBound
+        )
+      : jobs.filter((j) => !j.active && j.failed === null);
+    jobs = _.orderBy(jobs, ["priority", "created"], ["asc", "asc"]);
     // NOTE: here and below 'created' is sorted by 'asc' however in original it's 'desc'
 
     if (jobs.length) {
@@ -262,38 +272,57 @@ export class Queue {
 
     // If next job exists, get concurrent related jobs appropriately.
     if (nextJob) {
-
       const concurrency = this.worker.getConcurrency(nextJob.name);
 
+      if (!concurrency) {
+        return;
+      }
       let allRelatedJobs = this.jobDB.objects();
-      allRelatedJobs = (queueLifespanRemaining) 
-        ? allRelatedJobs.filter(j => (j.name === nextJob.name && !j.active && j.failed === null && j.timeout > 0 && j.timeout < timeoutUpperBound))
-        : allRelatedJobs.filter(j => (j.name === nextJob.name && !j.active && j.failed === null));
-      allRelatedJobs = _.orderBy(allRelatedJobs, ['priority', 'created'], ['asc', 'asc']);
+      allRelatedJobs = queueLifespanRemaining
+        ? allRelatedJobs.filter(
+            (j) =>
+              j.name === nextJob.name &&
+              !j.active &&
+              j.failed === null &&
+              j.timeout > 0 &&
+              j.timeout < timeoutUpperBound
+          )
+        : allRelatedJobs.filter(
+            (j) => j.name === nextJob.name && !j.active && j.failed === null
+          );
+      allRelatedJobs = _.orderBy(
+        allRelatedJobs,
+        ["priority", "created"],
+        ["asc", "asc"]
+      );
 
       let jobsToMarkActive = allRelatedJobs.slice(0, concurrency);
 
       // Grab concurrent job ids to reselect jobs as marking these jobs as active will remove
       // them from initial selection when write transaction exits.
       // See: https://stackoverflow.com/questions/47359368/does-realm-support-select-for-update-style-read-locking/47363356#comment81772710_47363356
-      const concurrentJobIds = jobsToMarkActive.map(job => job.id);
+      const concurrentJobIds = jobsToMarkActive.map((job) => job.id);
 
       // Mark concurrent jobs as active
-      jobsToMarkActive = jobsToMarkActive.map(job => {
+      jobsToMarkActive = jobsToMarkActive.map((job) => {
         job.active = true;
       });
 
       // Reselect now-active concurrent jobs by id.
       let reselectedJobs = this.jobDB.objects();
-      reselectedJobs = reselectedJobs.filter(rj => _.includes(concurrentJobIds, rj.id));
-      reselectedJobs = _.orderBy(reselectedJobs, ['priority', 'created'], ['asc', 'asc']);
+      reselectedJobs = reselectedJobs.filter((rj) =>
+        _.includes(concurrentJobIds, rj.id)
+      );
+      reselectedJobs = _.orderBy(
+        reselectedJobs,
+        ["priority", "created"],
+        ["asc", "asc"]
+      );
 
       concurrentJobs = reselectedJobs.slice(0, concurrency);
-
     }
 
     return concurrentJobs;
-
   }
 
   /**
@@ -312,7 +341,6 @@ export class Queue {
    * @param job {object} - Job model object
    */
   async processJob(job) {
-
     // Data must be cloned off the job object for several lifecycle callbacks to work correctly.
     // This is because job is deleted before some callbacks are called if job processed successfully.
     // More info: https://github.com/billmalarky/react-native-queue/issues/2#issuecomment-361418965
@@ -321,7 +349,12 @@ export class Queue {
     const jobPayload = JSON.parse(job.payload);
 
     // Fire onStart job lifecycle callback
-    this.worker.executeJobLifecycleCallback('onStart', jobName, jobId, jobPayload);
+    this.worker.executeJobLifecycleCallback(
+      "onStart",
+      jobName,
+      jobId,
+      jobPayload
+    );
 
     try {
       await this.worker.executeJob(job); // here we catch js/network errors
@@ -330,9 +363,18 @@ export class Queue {
       this.jobDB.delete(job);
 
       // Job has processed successfully, fire onSuccess and onComplete job lifecycle callbacks.
-      this.worker.executeJobLifecycleCallback('onSuccess', jobName, jobId, jobPayload);
-      this.worker.executeJobLifecycleCallback('onComplete', jobName, jobId, jobPayload);
-
+      this.worker.executeJobLifecycleCallback(
+        "onSuccess",
+        jobName,
+        jobId,
+        jobPayload
+      );
+      this.worker.executeJobLifecycleCallback(
+        "onComplete",
+        jobName,
+        jobId,
+        jobPayload
+      );
     } catch (error) {
       // Handle job failure logic, including retries.
       let jobData = JSON.parse(job.data);
@@ -365,23 +407,44 @@ export class Queue {
 
       // Execute job onFailure lifecycle callback.
 
-      if ( // filter network errors
-        error.message.indexOf('TIMEOUT') !== -1 ||
-        error.message.indexOf('Network request failed') !== -1
-      ) return false;
+      if (
+        // filter network errors
+        error.message.indexOf("TIMEOUT") !== -1 ||
+        error.message.indexOf("Network request failed") !== -1
+      )
+        return false;
 
-      if (jobData.failedAttempts === 1 || jobData.failedAttempts === jobData.attempts) { // report only first and last error
-        this.worker.executeJobLifecycleCallback('onFailure', jobName, jobId, jobPayload, error);
+      if (
+        jobData.failedAttempts === 1 ||
+        jobData.failedAttempts === jobData.attempts
+      ) {
+        // report only first and last error
+        this.worker.executeJobLifecycleCallback(
+          "onFailure",
+          jobName,
+          jobId,
+          jobPayload,
+          error
+        );
       }
 
       // If job has failed all attempts execute job onFailed and onComplete lifecycle callbacks.
       if (jobData.failedAttempts >= jobData.attempts) {
-        this.worker.executeJobLifecycleCallback('onFailed', jobName, jobId, jobPayload, error);
-        this.worker.executeJobLifecycleCallback('onComplete', jobName, jobId, jobPayload);
+        this.worker.executeJobLifecycleCallback(
+          "onFailed",
+          jobName,
+          jobId,
+          jobPayload,
+          error
+        );
+        this.worker.executeJobLifecycleCallback(
+          "onComplete",
+          jobName,
+          jobId,
+          jobPayload
+        );
       }
-
     }
-
   }
 
   /**
@@ -394,23 +457,18 @@ export class Queue {
    * @param jobName {string} - Name associated with job (and related job worker).
    */
   async flushQueue(jobName = null) {
-
     if (jobName) {
-
       let jobs = this.jobDB.objects();
-      jobs = jobs.filter(j => j.name === jobName);
+      jobs = jobs.filter((j) => j.name === jobName);
 
       if (jobs.length) {
         // NOTE: might not work
         this.jobDB.delete(jobs);
       }
-
     } else {
       this.jobDB.deleteAll();
     }
-
   }
-
 }
 
 /**
@@ -422,10 +480,8 @@ export class Queue {
  * @return {Queue} - A queue instance.
  */
 export default async function queueFactory(executeFailedJobsOnStart = false) {
-
   const queue = new Queue(executeFailedJobsOnStart);
   await queue.init();
 
   return queue;
-
 }
