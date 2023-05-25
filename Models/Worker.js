@@ -105,11 +105,12 @@ export default class Worker {
   async executeJob(job) {
     // If no worker assigned to job name, throw error.
     if (!Worker.workers[job.name]) {
-      throw new Error(
+      // Stop Logging Job Processing Errors as we move away from this library
+      /*throw new Error(
         "Failed on execute job: Job " +
           job.name +
           " does not have a worker assigned to it."
-      );
+      );*/
     }
 
     // Data must be cloned off the realm job object for the timeout logic promise race.
